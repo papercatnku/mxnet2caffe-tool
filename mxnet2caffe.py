@@ -49,6 +49,9 @@ supported_keys = [
     'LeakyReLU',
     'InstanceNorm', # bn instead for building prototxt
     'Dropout',
+    'sigmoid',
+    # mutiple a scalar
+    '_mul_scalar'
 ]
 
 rn_name_map = {
@@ -65,6 +68,8 @@ rn_name_map = {
     'Deconvolution':'dconv',
     'LeakyReLU':'lReLU',
     'InstanceNorm':'in',
+    'sigmoid':'sigm',
+    '_mul_scalar': 'ms'
 }
 
 def make_rnname(srcname):
@@ -99,12 +104,12 @@ def cvt_prototxt(ns, previous_layers, node, nodes, input_datashps, *args, **kwar
             print('add Input layer: %s'%node['name'])
             previous_layers[cf_cur_layer_name] = cvt_layer
         else:
-            # print('jump over arg: %s'%node['name'])
-            pass
-        return ns
+            print('jump over arg: %s'%node['name'])
+            return ns
+        # 
     # Convolution
     # TODO: support dialated 
-    if(node['op'] == 'Convolution'):
+    elif(node['op'] == 'Convolution'):
         input_layer_name = remove_tail(nodes[node['inputs'][0][0]]['name'],('_fwd','-fwd'))
         convolution_param = {
             'num_output':int(node['attrs']['num_filter']),
@@ -325,12 +330,43 @@ def cvt_prototxt(ns, previous_layers, node, nodes, input_datashps, *args, **kwar
         in_layers = [ previous_layers[inv_short_cf_name_mapping[x]] for x in input_layer_names]
         concat_param = {'axis':eval(node['attrs']['dim'])}
         _args = {
-            'name':mod_layer_name,
+            'name':cf_cur_layer_name,
             'concat_param':concat_param
         }
 
         cv_concat_layer = L.Concat(*in_layers, **_args)
+        #
+        ns.__setattr__(cf_cur_layer_name, cv_concat_layer)
+        #
         previous_layers[cf_cur_layer_name]  = cv_concat_layer
+    
+    elif(node['op'] == 'sigmoid'):
+        input_layer_name = remove_tail(nodes[node['inputs'][0][0]]['name'],('_fwd','-fwd'))
+        sigmoid_param = {}
+        cvt_sigmoid_layer = add_layer_to_net_spec(
+            ns,
+            L.Sigmoid,
+            cf_cur_layer_name,
+            previous_layers[inv_short_cf_name_mapping[input_layer_name]],
+            sigmoid_param=sigmoid_param,
+            in_place=False
+        )
+        previous_layers[cf_cur_layer_name]  = cvt_sigmoid_layer
+    
+    elif(node['op'] == '_mul_scalar'):
+        input_layer_name = remove_tail(nodes[node['inputs'][0][0]]['name'],('_fwd','-fwd'))
+        scale_param = {'bias_term':False,'axis':1}
+        cvt_layer_scale = add_layer_to_net_spec(
+            ns,
+            L.Scale,
+            cf_cur_layer_name,
+            previous_layers[inv_short_cf_name_mapping[input_layer_name]],
+            scale_param=scale_param,
+            in_place=False
+        )
+        previous_layers[cf_cur_layer_name]  = cvt_layer_scale
+
+
     else:
         raise NotImplementedError('%s not supportted'%node['op'])
 
@@ -338,7 +374,7 @@ def cvt_prototxt(ns, previous_layers, node, nodes, input_datashps, *args, **kwar
     return ns
 
 def make_caffe_model(ns, src_param_fn, out_prefix):
-     
+    
     src_params = mx.nd.load(src_param_fn)
     ns_params= ns.params
     for k, arr in src_params.items():
@@ -473,7 +509,16 @@ if __name__ == '__main__':
             shp = map(int, shp_str.split(','))
             dtshps[nm] = shp
         return dtshps
+
+
+    arg_list = [
+        '--sym', './models/picaso-n100rc10-yuv-styw-200000.000-tvw-phc0.010-phtv0.000-2.000-480-symbol.json-inf.json',
+        '--param', './models/picaso-n100rc10-yuv-styw-200000.000-tvw-phc0.010-phtv0.000-2.000-480-0017.params',
+        '--datashps', 'data0:1,1,540,960.data1:1,1,270,480.data2:1,1,270,480',
+        '--outprefix', './models/cf-models/yuv-test'
+    ]
         
-    args = get_args()
+    args = get_args(arg_list)
+    # args = get_args()
     dtshps = make_datashps(args.datashps)
     cvt_end2end(args.sym, args.param, dtshps, args.outprefix)

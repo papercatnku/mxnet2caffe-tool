@@ -1,3 +1,5 @@
 .vscode/
 *.pyc
 *.zip
+ST-Test.ipynb
+YUV-ST-Test.ipynb
