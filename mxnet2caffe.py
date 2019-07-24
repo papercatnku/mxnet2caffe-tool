@@ -51,7 +51,10 @@ supported_keys = [
     'Dropout',
     'sigmoid',
     # mutiple a scalar
-    '_mul_scalar'
+    '_mul_scalar',
+    # nearest upsample / tile / unpooling
+    'UpSampling',
+    'Pooling'
 ]
 
 rn_name_map = {
@@ -69,7 +72,9 @@ rn_name_map = {
     'LeakyReLU':'lReLU',
     'InstanceNorm':'in',
     'sigmoid':'sigm',
-    '_mul_scalar': 'ms'
+    '_mul_scalar': 'ms',
+    'UpSampling': 'ups',
+    'Pooling': 'pool',
 }
 
 def make_rnname(srcname):
@@ -365,7 +370,42 @@ def cvt_prototxt(ns, previous_layers, node, nodes, input_datashps, *args, **kwar
             in_place=False
         )
         previous_layers[cf_cur_layer_name]  = cvt_layer_scale
+    
+    elif(node['op'] == 'UpSampling'):
+        input_layer_name = remove_tail(nodes[node['inputs'][0][0]]['name'],('_fwd','-fwd'))
+        cvt_layer_upsample = add_layer_to_net_spec(
+            ns,
+            L.Upsample,
+            cf_cur_layer_name,
+            previous_layers[inv_short_cf_name_mapping[input_layer_name]],
+        )
+        previous_layers[cf_cur_layer_name]  = cvt_layer_upsample
+    
+    elif(node['op'] == 'Pooling'):
+        input_layer_name = remove_tail(nodes[node['inputs'][0][0]]['name'],('_fwd','-fwd'))
 
+        pooling_param = {}
+        if (node['attrs']['pool_type'] == 'avg'):
+            pooling_param['pool'] = 1
+        elif (node['attrs']['pool_type'] == 'max'):
+            pooling_param['pool'] = 0
+        else:
+            raise Exception('unsupported pooling type: %s'%node['attrs']['pool_type'] )
+
+        pooling_param['kernel_h'] = eval(node['attrs']['kernel'])[0] 
+        pooling_param['kernel_w'] = eval(node['attrs']['kernel'])[1]
+        pooling_param['stride_h'] = eval(node['attrs']['stride'])[0] 
+        pooling_param['stride_w'] = eval(node['attrs']['stride'])[1] 
+
+
+        cvt_layer_upsample = add_layer_to_net_spec(
+            ns,
+            L.Pooling,
+            cf_cur_layer_name,
+            previous_layers[inv_short_cf_name_mapping[input_layer_name]],
+            pooling_param=pooling_param
+        )
+        previous_layers[cf_cur_layer_name]  = cvt_layer_upsample
 
     else:
         raise NotImplementedError('%s not supportted'%node['op'])

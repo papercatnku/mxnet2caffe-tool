@@ -3,3 +3,8 @@
 *.zip
 ST-Test.ipynb
 YUV-ST-Test.ipynb
+*.json
+*.params
+*.prototxt
+*.caffemodel
+*.ipynb
